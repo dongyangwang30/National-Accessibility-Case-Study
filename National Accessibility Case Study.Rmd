@@ -1,0 +1,315 @@
+---
+output:
+  pdf_document:
+      keep_tex: true
+  html_document: default
+---
+```{r}
+install.packages('tidyverse')
+install.packages('yardstick')
+install.packages('pROC')
+```
+# National Accessibility Case Study
+
+### Project Brief
+
+Congratulations, you have landed your first job as a data scientist at National Accessibility! National Accessibility currently installs wheelchair ramps for office buildings and schools. However, the marketing manager wants the company to start installing ramps for event venues as well. According to a new survey, approximately 40% of event venues are not wheelchair accessible. However, it is not easy to know whether a venue already has a ramp installed. 
+
+The marketing manager would like to know whether you can develop a model to predict whether an event venue has a wheelchair ramp. To help you with this, he has provided you with a dataset of London venues. This data includes whether the venue has a ramp.
+
+It is a waste of time to contact venues that already have a ramp installed, and it also looks bad for the company. Therefore, it is especially important to exclude locations that already have a ramp. Ideally, at least two-thirds of venues predicted to be without a ramp should not have a ramp. 
+
+You will need to present your findings in two formats:
+
+- First, you will need to present your findings to the marketing manager via a 10 minute oral presentation. The owner has no technical data science background. 
+- You will also need to submit a technical report to your manager, who does have a strong technical data science background.
+
+The data you will use for this analysis can be accessed here: `"data/event_venues.csv"`
+
+## 1. Data Preparation
+
+The goal of this section is to understand the structure of the variables and find potential correlations for model fitting. This section is especially interested in finding variables that might correlate with the existence of ramps in the events.
+
+### 1.1 EDA
+
+```{r}
+# Clean the environment
+#rm(list=ls())
+
+# Load the data
+df <- read.csv("data/event_venues.csv")
+
+# Overview of the structure of variables
+head(df)
+str(df)
+
+# Format the character type to be logical: help calculating the mean
+df$Wheelchair.accessible <- as.logical(df$Wheelchair.accessible)
+df$Loud.music...events <- as.logical(df$Loud.music...events)
+df$Venue.provides.alcohol <- as.logical(df$Venue.provides.alcohol)
+df$Wi.Fi <- as.logical(df$Wi.Fi)
+df$supervenue <- as.logical(df$supervenue)
+df$Promoted...ticketed.events <- as.logical(df$Promoted...ticketed.events)
+
+# Mean of dummy variables
+lapply(df, mean)
+
+# Structure of dummy and numeric variables
+summary(df)
+```
+
+In the EDA, we found that there are 3910 observations and 10 variables in the dataset. Most of the variables are converted to logical variables to facilitate the understanding of their structures, including the presence of loud music, alcohol, WIFI, super venue, promotion, and wheelchair accessibility. The capacity variables are kept numeric. One advantage of this dataset is that exactly half of the data are wheelchair accessible, so analysis can be easily performed. Other variables are not so well distributed, such as only 7% of the events do not provide WIFI.
+
+### 1.2 Visualizations
+
+#### 1.2.1 Capacity and wheelchair accessibility
+```{r}
+# The relationship between the dependent variable and numeric variables
+
+
+# Total capacity of U-shaped portion
+# Since only 1 events have total capacity of U-shaped portion exceeding 500, 
+# we treat them as outliers and plot without them
+length(df$U.Shaped_max[df$U.Shaped_max > 500])
+hist(df$U.Shaped_max[df$U.Shaped_max <= 500],breaks = 30, 
+     main="Histogram for U-Shape Area Capacity", xlab = "U-Shape Area Capacity")
+boxplot(df$U.Shaped_max[df$U.Shaped_max <= 500] ~ 
+        df$Wheelchair.accessible[df$U.Shaped_max <= 500],  
+        main="Boxplot for U-Shape Area Capacity vs Wheelchair Accesibility", 
+        xlab = "Wheelchair Accesibility", ylab =  "U-Shape Area Capacity")
+
+length(df$U.Shaped_max[df$U.Shaped_max > 35.001 & df$U.Shaped_max <35.1])
+
+# In the dataset, one value 35.04545 appears frequently, also as shown in histogram.
+# It is not an integer and appears about 3/4 of the time, which is abnormal.
+# By using summary statistics above, this is equal to the mean.
+# This means original data had some missing values. Need to be careful 
+# about this variable for prediction.
+
+
+# Total standing capacity
+# Since only 3 events have total standing capacity exceeding 4000, 
+# we treat them as outliers and plot without them
+length(df$max_standing[df$max_standing > 4000])
+hist(df$max_standing[df$max_standing <= 4000],breaks = 30, 
+     main="Histogram for Standing Capacity", xlab = "Standing Capacity")
+
+# Zero inflated
+length(df$max_standing[df$max_standing == 0])
+boxplot(df$max_standing[df$max_standing <= 4000] ~ 
+        df$ Wheelchair.accessible[df$max_standing <= 4000],  
+        main="Boxplot for Standing Capacity vs Wheelchair Accesibility", 
+        xlab = "Wheelchair Accesibility", ylab =  "Standing Capacity")
+
+
+# Total capacity for theater
+
+# Since only 2 events have total standing capacity exceeding 2000, 
+# we treat them as outliers and plot without them
+length(df$Theatre_max[df$Theatre_max > 2000])
+hist(df$Theatre_max[df$Theatre_max <= 2000],breaks = 30, 
+        main="Histogram for Theater Capacity", xlab = "Theater Capacity")
+boxplot(df$Theatre_max[df$Theatre_max <= 2000] ~ 
+        df$Wheelchair.accessible[df$Theatre_max <= 2000],  
+        main="Boxplot for Theater Capacity vs Wheelchair Accesibility", 
+        xlab = "Wheelchair Accesibility", ylab =  "Theater Capacity")
+
+length(df$Theatre_max[df$Theatre_max > 112.7 & df$Theatre_max <  112.8])
+# Similar as in total capacity of U-shaped portion, 58% of data are the mean.
+# Careful when interpreting
+
+
+# If we don't consider the ones with missing actual values
+boxplot(df$U.Shaped_max[df$U.Shaped_max < 35.001 | 
+        df$U.Shaped_max > 35.1 & df$U.Shaped_max <= 500] ~ 
+        df$Wheelchair.accessible[df$U.Shaped_max < 35.001 |  
+        df$U.Shaped_max > 35.1 & df$U.Shaped_max <= 500],  
+        main="Boxplot for U-Shaped Area Capacity vs Wheelchair Accesibility (Actual)", 
+        xlab = "Wheelchair Accesibility", ylab =  "U-Shaped Area Capacity")
+
+boxplot(df$Theatre_max[df$Theatre_max < 112.7 | 
+        df$Theatre_max > 112.8 & df$Theatre_max <= 2000] ~
+        df$Wheelchair.accessible[df$Theatre_max < 112.7 | 
+        df$Theatre_max > 112.8 & df$Theatre_max <= 2000],  
+        main="Boxplot for Theater Capacity vs Wheelchair Accesibility (Actual)", 
+        xlab = "Wheelchair Accesibility", ylab =  "Theater Capacity" )
+```
+
+Given the visualizations, only total standing capacity seems to make difference. U-shaped and theater capacities do not exhibit a clear pattern for wheelchair accessibility, due to large amount of missing actual values. If we only consider true values, all three variable show that larger capacity in any regard is associated with wheelchairs accessibility.
+
+  
+#### 1.2.2 Other factors and wheelchair accessibility
+
+Now we consider the relationship between the dependent variable and dummy variables.
+```{r}
+Wh_wifi <- table(df$Wheelchair.accessible, df$Wi.Fi)
+barplot(Wh_wifi, main="Wheelchair accessibility vs WIFI presence",
+  xlab="Presence of WIFI", col=c("darkblue","red"),
+  legend = rownames(Wh_wifi), beside=TRUE)
+
+Wh_loud <- table(df$Wheelchair.accessible, df$Loud.music...events)
+barplot(Wh_loud, main="Wheelchair accessibility vs loud music presence",
+  xlab="Presence of loud music", col=c("darkblue","red"),
+  legend = rownames(Wh_loud), beside=TRUE)
+
+Wh_alcohol <- table(df$Wheelchair.accessible, df$Venue.provides.alcohol)
+barplot(Wh_alcohol, main="Wheelchair accessibility vs alcohol presence",
+  xlab="Presence of alcohol", col=c("darkblue","red"),
+  legend = rownames(Wh_alcohol), beside=TRUE)
+
+Wh_supervenue <- table(df$Wheelchair.accessible, df$supervenue)
+barplot(Wh_supervenue, main="Wheelchair accessibility vs supervenue",
+  xlab="Whether the venue is supervenue", col=c("darkblue","red"),
+  legend = rownames(Wh_supervenue), beside=TRUE)
+
+Wh_promote <- table(df$Wheelchair.accessible, df$Promoted...ticketed.events)
+barplot(Wh_promote, main="Wheelchair accessibility vs promotion presence",
+  xlab="Presence of promotion", col=c("darkblue","red"),
+  legend = rownames(Wh_promote), beside=TRUE)
+```
+
+Based on visualizations, the presence of WIFI, loud music, alcohol, and promotional tickets is associated with better wheelchair accessibility. If the venue is a supervenue, it is less likely to have wheelchair accessibility.
+
+## 2. Model
+The goal of this section is to fit a logistic model on the data to be able to make predictions for ramp availability (wheelchair accessibility) based on other variables. It is particularly concerned that at least two-thirds of venues predicted to be without a ramp should not have a ramp. The model is evaluated accordingly: the focus is on the negative predictive value (npv), while not sacrificing too much accuracy.
+
+### 2.1 Model Fitting
+
+I fit two models because of the incomplete information in two variables, U.Shaped_max and Theatre_max. The purpose is to be able to make predictions in a more precise manner. If we do have accurate information for those two variables, it is desirable that we use the second model. Otherwise, we can input the mean values for those two variables and make a prediction using the first model.
+
+#### Model with all values
+
+First I fit a model with all values in the dataset. Step-wise regression is used to find the optimal regression model.
+
+```{r}
+library(tidyverse)
+# Specify a null model with no predictors
+null_model <- glm(Wheelchair.accessible ~ 1, data = df, family = "binomial")
+
+# Specify the full model using all of the potential predictors
+full_model <- glm(Wheelchair.accessible ~ . - venue_name , data = df, family = "binomial")
+
+# Use a forward stepwise algorithm to build a parsimonious model
+step_model <- step(null_model, scope = list(lower = null_model, upper = full_model), direction = "forward")
+
+summary(step_model)
+```
+
+
+#### Model with only true values
+
+Then I fit a model with only true values (in terms of two variables, namely U.Shaped_max and Theatre_max) in the dataset. This model contains roughly 1/4 of the observations in the original dataset. Step-wise regression is used to find the optimal regression model.
+
+```{r}
+df1 = df[df$Theatre_max < 112.7 | df$Theatre_max > 112.8,]
+df2 = df1[df1$U.Shaped_max < 35.001 | df1$U.Shaped_max > 35.1, ]
+
+# Specify a null model with no predictors
+null_model1 <- glm(Wheelchair.accessible ~ 1, 
+                   data = df2, family = "binomial")
+
+# Specify the full model using all of the potential predictors
+full_model1 <- glm(Wheelchair.accessible ~ . - venue_name , 
+                   data = df2, family = "binomial")
+
+# Use a forward stepwise algorithm to build a parsimonious model
+step_model1 <- step(null_model1, 
+                    scope = list(lower = null_model1, upper = full_model1), 
+                    direction = "forward")
+
+summary(step_model1)
+```
+
+Comparing the two models, we can find that a few variables are reliable in predicting wheelchair accessibility. The presence of alcohol, the event being promoted or ticketed are the presence of WIFI positively correlated with wheelchair accessibility; the venue as supervenue and the presence of loud music are negatively correlated with wheelchair accessibility. The capacity variables have mixing results and depend on the specific model. Therefore, in general, we would look for events where no alcohol, WIFI, or ticketing is present, as well as events where the venue is supervenue and where loud music is played.
+
+
+### 2.2 Model Evaluation
+
+The key to evaluate the two models is how good their predictions are when venues are not predicted to be with a ramp. ROC curves are also used to assist model evaluation.
+
+#### Model with all values
+
+Threshold is set to 0.4 to control the False Negative rates, such that the result for negative predictive value will be higher, without sacrificing too much accuracy.
+
+```{r}
+library(yardstick)
+
+# From previous step
+actual_response <- as.numeric(df$Wheelchair.accessible)
+predicted_response <- round(fitted(step_model)+0.1)
+outcomes <- table(predicted_response, actual_response)
+confusion <- conf_mat(outcomes)
+
+# "Automatically" plot the confusion matrix
+autoplot(confusion)
+
+# Get summary metrics
+summary(confusion, event_level = "second")
+```
+
+The NPV is 66.6%, which is desirable for our project.
+
+```{r}
+# Estimate the stepwise donation probability
+step_prob <- predict(step_model, type = "response")
+
+# Plot the ROC of the stepwise model
+library(pROC)
+ROC <- roc(df$Wheelchair.accessible, step_prob)
+plot(ROC, col = "red")
+auc(ROC)
+```
+
+The area under the curve is above 0.6594, so the model performs just fine.
+
+#### Model with only true values
+
+Threshold is set to 0.4 to control the False Negative rates, such that the result for negative predictive value will be higher, without sacrificing too much accuracy.
+
+```{r}
+library(yardstick)
+
+# From previous step
+actual_response1 <- as.numeric(df2$Wheelchair.accessible)
+predicted_response1 <- round(fitted(step_model1) + 0.1)
+outcomes1 <- table(predicted_response1, actual_response1)
+confusion1 <- conf_mat(outcomes1)
+
+# "Automatically" plot the confusion matrix
+autoplot(confusion1)
+
+# Get summary metrics
+summary(confusion1, event_level = "second")
+```
+
+The NPV is 70.3%, which is desirable for our project. The accuracy is also good at 70%.
+
+```{r}
+# Estimate the stepwise donation probability
+step_prob1 <- predict(step_model1, type = "response")
+
+# Plot the ROC of the stepwise model
+library(pROC)
+ROC <- roc(df2$Wheelchair.accessible, step_prob1)
+plot(ROC, col = "red")
+auc(ROC)
+```
+
+The area under the curve is above 0.7, so the model performs well.
+
+Therefore, the model with the actual values is better at predicting wheelchair accessibility when the predicted value is 0. But we still need the first model to be able to account for the situation where the capacity information is missing.
+
+
+## 3. Summary
+The goal of this section is to summarize the analysis and discuss its impacts. It's also concerned to provide insights on how future steps might improve the results and how to make best use of the results.
+
+### 3.1 Main Findings
+Two models can be applied depending on whether we have complete information on the capacity information, and either model will be able to provide the right suggestion 2/3 of the time. Also, we should take time prioritizing events without alcohol, WIFI, ticketing or promotion. At the same time, we want to search for super venue events and events with loud music. 
+
+### 3.2 Further Steps
+First, we can keep collecting data, preferably data with capacity information because the second model is better. We may also seek to gather new information on the type of host, e.g., NGO or corporate, and the type of the event, e.g., a show or concert. We can improve our models in this manner.
+
+Second, we should prioritize reaching to events with the characteristics we just found. Then we are likely to give help to people who really need the ramps and not to make our company look bad.
+
+
+
